@@ -61,8 +61,24 @@ public class Callback : PageModel
                           externalUser.FindFirst(ClaimTypes.NameIdentifier) ??
                           throw new Exception("Unknown userid");
 
-        var provider = result.Properties.Items["scheme"];
-        var providerUserId = userIdClaim.Value;
+		/*
+         * Original IdentitytServer6 line is:
+         * var provider = result.Properties.Items["scheme"];
+         * but it's incorrect, if external provider uses code:
+         * var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), properties, Scheme.Name);
+         * the key should be ".AuthScheme".
+         * I'm changed the code:
+         */
+		string provider;
+        if (!result.Properties.Items.TryGetValue(".AuthScheme", out provider))
+        {
+			if (!result.Properties.Items.TryGetValue("scheme", out provider))
+			{
+                throw new Exception("Unknown scheme");
+			}
+		}
+
+		var providerUserId = userIdClaim.Value;
 
         // find external user
         var user = await _userManager.FindByLoginAsync(provider, providerUserId);
@@ -79,7 +95,7 @@ public class Callback : PageModel
         // this is typically used to store data needed for signout from those protocols.
         var additionalLocalClaims = new List<Claim>();
         var localSignInProps = new AuthenticationProperties();
-        CaptureExternalLoginContext(result, additionalLocalClaims, localSignInProps);
+        CaptureExternalLoginContext(provider, result, additionalLocalClaims, localSignInProps);
 
         // issue authentication cookie for user
         await _signInManager.SignInWithClaimsAsync(user, localSignInProps, additionalLocalClaims);
@@ -114,7 +130,7 @@ public class Callback : PageModel
         var user = new ApplicationUser
         {
             Id = sub,
-            UserName = sub, // don't need a username, since the user will be using an external provider to login
+            UserName = sub,
         };
 
         // email
@@ -123,17 +139,24 @@ public class Callback : PageModel
         if (email != null)
         {
             user.Email = email;
+            user.UserName = email;
         }
-            
-        // create a list of claims that we want to transfer into our store
-        var filtered = new List<Claim>();
 
-        // user's display name
-        var name = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.Name)?.Value ??
-                   claims.FirstOrDefault(x => x.Type == ClaimTypes.Name)?.Value;
+		// user's display name
+		var name = claims.FirstOrDefault(x => x.Type == JwtClaimTypes.Name)?.Value ??
+				   claims.FirstOrDefault(x => x.Type == ClaimTypes.NameIdentifier)?.Value ??
+				   claims.FirstOrDefault(x => x.Type == ClaimTypes.Name)?.Value;
+		if (name != null)
+		{
+			user.UserName = name;
+		}
+
+		// create a list of claims that we want to transfer into our store
+		var filtered = new List<Claim>();
+
         if (name != null)
         {
-            filtered.Add(new Claim(JwtClaimTypes.Name, name));
+			filtered.Add(new Claim(JwtClaimTypes.Name, name));
         }
         else
         {
@@ -172,14 +195,15 @@ public class Callback : PageModel
 
     // if the external login is OIDC-based, there are certain things we need to preserve to make logout work
     // this will be different for WS-Fed, SAML2p or other protocols
-    private void CaptureExternalLoginContext(AuthenticateResult externalResult, List<Claim> localClaims, AuthenticationProperties localSignInProps)
+    private void CaptureExternalLoginContext(string scheme, AuthenticateResult externalResult, List<Claim> localClaims, AuthenticationProperties localSignInProps)
     {
-        // capture the idp used to login, so the session knows where the user came from
-        localClaims.Add(new Claim(JwtClaimTypes.IdentityProvider, externalResult.Properties.Items["scheme"]));
+		// capture the idp used to login, so the session knows where the user came from
+		//localClaims.Add(new Claim(JwtClaimTypes.IdentityProvider, externalResult.Properties.Items["scheme"]));
+		localClaims.Add(new Claim(JwtClaimTypes.IdentityProvider, scheme));
 
-        // if the external system sent a session id claim, copy it over
-        // so we can use it for single sign-out
-        var sid = externalResult.Principal.Claims.FirstOrDefault(x => x.Type == JwtClaimTypes.SessionId);
+		// if the external system sent a session id claim, copy it over
+		// so we can use it for single sign-out
+		var sid = externalResult.Principal.Claims.FirstOrDefault(x => x.Type == JwtClaimTypes.SessionId);
         if (sid != null)
         {
             localClaims.Add(new Claim(JwtClaimTypes.SessionId, sid.Value));

@@ -27,7 +27,8 @@ try
 
     var app = builder
         .ConfigureServices()
-        .ConfigurePipeline();
+        .ConfigurePipeline()
+        .MigrateDatabase();
 
     app.Run();
 }

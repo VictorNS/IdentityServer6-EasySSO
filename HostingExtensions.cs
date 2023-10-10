@@ -1,5 +1,6 @@
 using Duende.IdentityServer;
 using IdentityServerHost.Data;
+using IdentityServerHost.EasySso;
 using IdentityServerHost.Models;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -107,7 +108,8 @@ internal static class HostingExtensions
                     NameClaimType = "name",
                     RoleClaimType = "role"
                 };
-            });
+            })
+            .AddEasySSO();
     }
 
 
@@ -127,6 +129,19 @@ internal static class HostingExtensions
         app.MapRazorPages()
             .RequireAuthorization();
 
-        return app;
+		return app;
     }
+
+    internal static WebApplication MigrateDatabase(this WebApplication app)
+    {
+		using (var scope = ((IApplicationBuilder)app).ApplicationServices.GetRequiredService<IServiceScopeFactory>().CreateScope())
+		{
+			using (var context = scope.ServiceProvider.GetService<ApplicationDbContext>())
+			{
+				context.Database.Migrate();
+			}
+		}
+
+		return app;
+	}
 }
